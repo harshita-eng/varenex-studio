@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use Illuminate\Support\ServiceProvider;
+use App\Services\TableSchemaService;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -11,7 +12,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // Bind the service class to the container
+        $this->app->singleton(TableSchemaService::class, function ($app) {
+            return new TableSchemaService();
+        });
     }
 
     /**
