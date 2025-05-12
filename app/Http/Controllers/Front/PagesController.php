@@ -8,7 +8,6 @@ use DB, Redirect, Session, Auth, Mail;
 
 class PagesController extends Controller
 {
-                    
     public function home() {
 
         $db = DB::connection('mysql')->select('SHOW TABLES'); 

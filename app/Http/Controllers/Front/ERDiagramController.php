@@ -7,41 +7,10 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use DB;
 
+
 class ERDiagramController extends Controller
 {
-    
     protected $path = 'er-schema.json';
-    
-    
-    // public function index()
-    // {
-    //     $dummyData = [
-    //         "tables" => [
-    //             [
-    //                 "id" => "users",
-    //                 "name" => "users",
-    //                 "columns" => [
-    //                     ["name" => "id", "type" => "INT", "primary" => true],
-    //                     ["name" => "name", "type" => "VARCHAR(255)"]
-    //                 ]
-    //             ],
-    //             [
-    //                 "id" => "posts",
-    //                 "name" => "posts",
-    //                 "columns" => [
-    //                     ["name" => "id", "type" => "INT", "primary" => true],
-    //                     ["name" => "user_id", "type" => "INT"],
-    //                     ["name" => "content", "type" => "TEXT"]
-    //                 ]
-    //             ]
-    //         ],
-    //         "relationships" => [
-    //             ["from" => "users.id", "to" => "posts.user_id"]
-    //         ]
-    //     ];
-
-    //     return view('erd', ['erdData' => $dummyData]);
-    // }
 
     public function index()
     {

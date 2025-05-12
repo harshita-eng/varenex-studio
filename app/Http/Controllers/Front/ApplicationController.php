@@ -23,6 +23,9 @@ use App\Models\CompanySchemas;
 use App\Models\CompanySettings;
 use App\Models\CompanyWorkflows;
 use App\Models\DynamicModel;
+use App\Models\templates;
+use App\Models\templateTables;
+use App\Models\TemplateTableFields;
 use Illuminate\Support\Facades\Storage;
 use App\Services\TableSchemaService;
 
@@ -32,7 +35,8 @@ class ApplicationController extends Controller
     protected $path = 'er-schema.json';
     protected $allTables;
     protected $tables = [];
-    
+
+
     public function __construct(TableSchemaService $tableSchemaService)
     {
         $this->tableSchemaService = $tableSchemaService;
@@ -98,6 +102,7 @@ class ApplicationController extends Controller
     {
         $request = $request->all(); //dd($request);
         $json = Storage::get($this->path); //dd($json);
+
         if(!empty($request)) 
         {            
             $appName = str_replace(" ","_",strtolower($request['app_name']));
@@ -106,7 +111,7 @@ class ApplicationController extends Controller
             {
                 Session::flash('message', 'Application name already taken. Please enter a different name !'); 
                 return Redirect::back();
-            } else {  
+            } else {
 
                 // save as user 
                 $objUser = new User;
@@ -169,75 +174,22 @@ class ApplicationController extends Controller
                 ";
                 DB::statement($user);
 
-                //create table schemas
-                if(!empty($json)) 
-                {
-                    $jsonArr = json_decode($json);
+                //create db tables
 
-                    // Check if JSON was decoded properly
-                    if (is_null($jsonArr)) {
-                        die("Invalid JSON provided.\n");
-                    }
+                if($request['source_type'] == 'scratch') {
 
-                    foreach ($jsonArr as $key => $value) {
-                        // Ensure $value is an array or iterable
-                        if (!is_array($value)) {
-                            echo "Invalid format at key: $key\n";
-                            var_dump($value);
-                            continue;
-                        }
+                    $gallery = $this->scratch($appName, $request['items']);
+                } 
 
-                        foreach ($value as $tab => $table) {
-                            // Ensure $table is an object and has 'name' and 'columns'
-                            if (!is_object($table) || !isset($table->name) || !isset($table->columns)) {
-                                echo "Skipping invalid table structure at tab: $tab\n";
-                                var_dump($table);
-                                continue;
-                            }
+                else if ($request['source_type'] == 'gallery') {
 
-                            $tableName  = $table->name;
-                            $columnsSql = [];
+                    $gallery = $this->gallery($appName, $request['items']);
+                }  
 
-                            if (is_array($table->columns) && count($table->columns) > 0) {
-                                foreach ($table->columns as $keyCol => $valCol) {
-                                    // Ensure column has name and type
-                                    if (!isset($valCol->name) || !isset($valCol->type)) {
-                                        echo "Skipping invalid column in table $tableName:\n";
-                                        var_dump($valCol);
-                                        continue;
-                                    }
+                else if ($request['source_type'] == 'csv') {
 
-                                    $columnLine = "`{$valCol->name}` {$valCol->type}";
-
-                                    if (isset($valCol->nullable) && $valCol->nullable === false) {
-                                        $columnLine .= ' NOT NULL';
-                                    }
-
-                                    if (!empty($valCol->auto_increment)) {
-                                        $columnLine .= ' AUTO_INCREMENT';
-                                    }
-
-                                    if (isset($valCol->primary) && $valCol->primary === true) {
-                                        $columnLine .= ' PRIMARY KEY';
-                                    }
-
-                                    $columnsSql[] = $columnLine;
-                                }
-
-                                if (!empty($columnsSql)) {
-                                    $columnsSqlString = implode(", ", $columnsSql); 
-                                    $fullTableName = "`$appName`.`$tableName`"; 
-
-                                    $createSql = DB::statement("CREATE TABLE IF NOT EXISTS $fullTableName ($columnsSqlString) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
-
-                                    // Uncomment to run:
-                                    // DB::statement($createSql);
-                                    echo "Prepared SQL for $fullTableName:\n$createSql\n\n";
-                                }
-                            }
-                        }
-                    }
-                }
+                    $gallery = $this->csvExport($appName, $request['import_csv']); 
+                } 
                 
                 // company details
                 $objDetials = new CompanyDetails;
@@ -343,7 +295,7 @@ class ApplicationController extends Controller
                                 $roleObj = new UserRoles;
                                 $roleObj->department_id = $departObj->id;
                                 $roleObj->user_role = $roles['name'];
-                                $roleObj->permissions = implode(',', $roles['permissions']);
+                                $roleObj->permissions = (isset($roles['permissions'])) ? implode(',', $roles['permissions']) : '';
                                 $roleObj->status = 1;
                                 $roleObj->save();
                                 DB::statement("INSERT INTO $appName"."."."`roles`(`department_id`,`roles`,`permission`) VALUES ('".$departObj->id."','".$roles['name']."','".implode(',', $roles['permissions'])."')");
@@ -366,8 +318,8 @@ class ApplicationController extends Controller
                 }
 
                 // company workflow
-                if(count($request['workflow']) > 0) {
-                    foreach($request['workflow'] as $val) {
+                if(count($request['items']) > 0) {
+                    foreach($request['items'] as $val) {
                         $objWorkflow = new CompanyWorkflows;
                         $objWorkflow->company_id = $obj->id;
                         $objWorkflow->workflow = $val;
@@ -380,6 +332,8 @@ class ApplicationController extends Controller
                 $objSchema->company_id = $obj->id;
                 $objSchema->schemas = Storage::get($this->path);
                 $objSchema->save();
+
+                // create tables according to the source type
 
                 return redirect()->route('appdashboard', $appName)->with('success', 'Your onboarding is complete! Welcome aboard — you are all set to get started !');
             }
@@ -445,59 +399,59 @@ class ApplicationController extends Controller
     //             }
 
     //             // import csv data
-    //             if(isset($request['import_csv'])) 
-    //             {
-    //                 $file   = request()->file('import_csv'); 
-    //                 $handle = fopen($file->getRealPath(), 'r');
-    //                 $datasets = [];
-    //                 $currentSet = null;
+                // if(isset($request['import_csv'])) 
+                // {
+                //     $file   = request()->file('import_csv'); 
+                //     $handle = fopen($file->getRealPath(), 'r');
+                //     $datasets = [];
+                //     $currentSet = null;
 
-    //                 while (($line = fgetcsv($handle)) !== false) 
-    //                 {
-    //                     if (empty(array_filter($line))) continue; // skip empty lines
+                //     while (($line = fgetcsv($handle)) !== false) 
+                //     {
+                //         if (empty(array_filter($line))) continue; // skip empty lines
 
-    //                     if (in_array('id', $line)) {
-    //                         if ($currentSet) {
-    //                             $datasets[] = $currentSet;
-    //                         }
-    //                         $currentSet = [
-    //                             'headers' => array_map('trim', $line),
-    //                             'rows' => [],
-    //                         ];
-    //                     } else {
-    //                         if ($currentSet) {
-    //                             $currentSet['rows'][] = $line;
-    //                         }
-    //                     }
-    //                 }
+                //         if (in_array('id', $line)) {
+                //             if ($currentSet) {
+                //                 $datasets[] = $currentSet;
+                //             }
+                //             $currentSet = [
+                //                 'headers' => array_map('trim', $line),
+                //                 'rows' => [],
+                //             ];
+                //         } else {
+                //             if ($currentSet) {
+                //                 $currentSet['rows'][] = $line;
+                //             }
+                //         }
+                //     }
 
-    //                 if ($currentSet) {
-    //                     $datasets[] = $currentSet;
-    //                 }
-    //                 fclose($handle);
+                //     if ($currentSet) {
+                //         $datasets[] = $currentSet;
+                //     }
+                //     fclose($handle);
                     
-    //                 foreach ($datasets as $index => $dataset) 
-    //                 {
-    //                     $headers = $dataset['headers'];
-    //                     $rows = $dataset['rows'];
-    //                     $tableName = 'import_table_' . ($index + 1);
+                //     foreach ($datasets as $index => $dataset) 
+                //     {
+                //         $headers = $dataset['headers'];
+                //         $rows = $dataset['rows'];
+                //         $tableName = 'import_table_' . ($index + 1);
 
-    //                     if (Schema::hasTable($tableName)) {
-    //                         return back()->withErrors(['file' => "Table '$tableName' already exists."]);
-    //                     }
+                //         if (Schema::hasTable($tableName)) {
+                //             return back()->withErrors(['file' => "Table '$tableName' already exists."]);
+                //         }
                         
-    //                     $columnsSql = implode(', ', array_map(function ($col) {
-    //                         return "`" . preg_replace('/[^a-zA-Z0-9_]/', '_', $col) . "` VARCHAR(255)";
-    //                     }, $headers));
+                //         $columnsSql = implode(', ', array_map(function ($col) {
+                //             return "`" . preg_replace('/[^a-zA-Z0-9_]/', '_', $col) . "` VARCHAR(255)";
+                //         }, $headers));
 
-    //                     DB::statement("CREATE TABLE new_erp.`$tableName` (t_id INT AUTO_INCREMENT PRIMARY KEY, $columnsSql)");
-    //                     foreach ($rows as $row) { 
-    //                         if (count($row) !== count($headers)) continue;
-    //                         $data = array_combine($headers, $row);
-    //                         DB::table($appName.".".$tableName)->insert($data);
-    //                     }
-    //                 }
-    //             }
+                //         DB::statement("CREATE TABLE new_erp.`$tableName` (t_id INT AUTO_INCREMENT PRIMARY KEY, $columnsSql)");
+                //         foreach ($rows as $row) { 
+                //             if (count($row) !== count($headers)) continue;
+                //             $data = array_combine($headers, $row);
+                //             DB::table($appName.".".$tableName)->insert($data);
+                //         }
+                //     }
+                // }
 
     //             // scratch
     //             if(isset($request['scratch'])) 
@@ -638,17 +592,206 @@ class ApplicationController extends Controller
         dd(decrypt($id));
     }
 
-    public function csvExport() {
+    public function  gallery($appname, $workflow) 
+    {
 
-        
+        $templates = templates::where('id','1')->select('id','name','status')->first();
+        $tempTables = templateTables::where('template_id', $templates['id'])->select('id','template_id','table_name','status')->get();
+        $templateFields = TemplateTableFields::whereIn('template_table_id', [1, 2, 3, 4, 5, 6])->get()->toArray();
+        $groupedFields = collect($templateFields)->groupBy('template_table_id');
+
+        foreach ($tempTables as $table) 
+        {
+            $tableName = $table['table_name'];  
+            $fields = $groupedFields[$table['id']] ?? collect();
+
+            if ($fields->isEmpty()) continue;
+
+            $columnsSql = [];
+
+            // Optional: Add an `id` column
+            $columnsSql[] = "`id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY";
+
+            foreach ($fields as $field) 
+            {
+                $columnName = $field['column_name'];
+                $dataType = strtoupper($field['data_type']); // Ensure uppercase like 'VARCHAR', 'INT'
+
+                // Map to SQL data type with default sizes where needed
+                switch ($dataType) {
+                    case 'VARCHAR':
+                        $columnsSql[] = "`$columnName` VARCHAR(255) NULL";
+                        break;
+                    case 'INT':
+                    case 'INTEGER':
+                        $columnsSql[] = "`$columnName` INT NULL";
+                        break;
+                    case 'TEXT':
+                        $columnsSql[] = "`$columnName` TEXT NULL";
+                        break;
+                    case 'BOOLEAN':
+                        $columnsSql[] = "`$columnName` TINYINT(1) DEFAULT 0";
+                        break;
+                    case 'DATE':
+                        $columnsSql[] = "`$columnName` DATE NULL";
+                        break;
+                    case 'DATETIME':
+                        $columnsSql[] = "`$columnName` DATETIME NULL";
+                        break;
+                    default:
+                        $columnsSql[] = "`$columnName` $dataType NULL"; // fallback
+                        break;
+                }
+            }
+
+            // Add timestamps (optional)
+            $columnsSql[] = "`created_at` TIMESTAMP NULL DEFAULT NULL";
+            $columnsSql[] = "`updated_at` TIMESTAMP NULL DEFAULT NULL";
+
+            // Combine all column definitions
+            $columnsString = implode(",\n", $columnsSql); 
+
+            // Final CREATE TABLE query
+            $createTableSql = "CREATE TABLE IF NOT EXISTS `$appname`.`$tableName` (\n$columnsString\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;";
+
+            // Execute the query on the secondary database
+            DB::statement($createTableSql);
+        }
+        return 'true';
     }
 
+    public function scratch ($appname, $workflow) 
+    {
+        $json = Storage::get($this->path);
+        if(!empty($json)) 
+        {
+            $jsonArr = json_decode($json);
 
+            // Check if JSON was decoded properly
+            if (is_null($jsonArr)) {
+                die("Invalid JSON provided.\n");
+            }
 
+            foreach ($jsonArr as $key => $value) {
+                // Ensure $value is an array or iterable
+                if (!is_array($value)) {
+                    echo "Invalid format at key: $key\n";
+                    var_dump($value);
+                    continue;
+                }
 
+                foreach ($value as $tab => $table) {
+                    // Ensure $table is an object and has 'name' and 'columns'
+                    if (!is_object($table) || !isset($table->name) || !isset($table->columns)) {
+                        echo "Skipping invalid table structure at tab: $tab\n";
+                        var_dump($table);
+                        continue;
+                    }
 
+                    $tableName  = $table->name;
+                    $columnsSql = [];
 
+                    if (is_array($table->columns) && count($table->columns) > 0) {
+                        foreach ($table->columns as $keyCol => $valCol) {
+                            // Ensure column has name and type
+                            if (!isset($valCol->name) || !isset($valCol->type)) {
+                                echo "Skipping invalid column in table $tableName:\n";
+                                var_dump($valCol);
+                                continue;
+                            }
 
+                            $columnLine = "`{$valCol->name}` {$valCol->type}";
 
-    
+                            if (isset($valCol->nullable) && $valCol->nullable === false) {
+                                $columnLine .= ' NOT NULL';
+                            }
+
+                            if (!empty($valCol->auto_increment)) {
+                                $columnLine .= ' AUTO_INCREMENT';
+                            }
+
+                            if (isset($valCol->primary) && $valCol->primary === true) {
+                                $columnLine .= ' PRIMARY KEY';
+                            }
+
+                            $columnsSql[] = $columnLine;
+                        }
+
+                        if (!empty($columnsSql)) {
+                            $columnsSqlString = implode(", ", $columnsSql); 
+                            $fullTableName = "`$appname`.`$tableName`"; 
+
+                            $createSql = DB::statement("CREATE TABLE IF NOT EXISTS $fullTableName ($columnsSqlString) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+
+                            // Uncomment to run:
+                            // DB::statement($createSql);
+                            echo "Prepared SQL for $fullTableName:\n$createSql\n\n";
+                        }
+                    }
+                }
+            }
+        } else {
+
+            return false;
+        }
+    } 
+
+    public function csvExport($appname, $csv) 
+    {
+        
+        if(isset($csv)) 
+        {
+            //$file   = request()->file($csv);  
+            $handle = fopen($csv->getRealPath(), 'r'); 
+            $datasets = [];
+            $currentSet = null;
+
+            while (($line = fgetcsv($handle)) !== false) 
+            {
+                if (empty(array_filter($line))) continue; // skip empty lines
+
+                if (in_array('id', $line)) {
+                    if ($currentSet) {
+                        $datasets[] = $currentSet;
+                    }
+                    $currentSet = [
+                        'headers' => array_map('trim', $line),
+                        'rows' => [],
+                    ];
+                } else {
+                    if ($currentSet) {
+                        $currentSet['rows'][] = $line;
+                    }
+                }
+            }
+
+            if ($currentSet) {
+                $datasets[] = $currentSet;
+            }
+            fclose($handle);
+            
+            foreach ($datasets as $index => $dataset) 
+            {
+                $headers = $dataset['headers'];
+                $rows = $dataset['rows'];
+                $tableName = 'import_table_' . ($index + 1);
+
+                if (Schema::hasTable($tableName)) {
+                    return back()->withErrors(['file' => "Table '$tableName' already exists."]);
+                }
+                
+                $columnsSql = implode(', ', array_map(function ($col) {
+                    return "`" . preg_replace('/[^a-zA-Z0-9_]/', '_', $col) . "` VARCHAR(255)";
+                }, $headers));
+
+                DB::statement("CREATE TABLE `$appname`.`$tableName` (t_id INT AUTO_INCREMENT PRIMARY KEY, $columnsSql)");
+                foreach ($rows as $row) { 
+                    if (count($row) !== count($headers)) continue;
+                    $data = array_combine($headers, $row);
+                    DB::table($appname.".".$tableName)->insert($data);
+                }
+            }
+        }
+        return 'true';
+    }
 }
