@@ -1,0 +1,68 @@
+.error{
+  font-size:12px;
+  color:red;
+}
+.user-info{
+  font-size:16px;
+  color:blue;
+}
+a {
+  text-decoration: none;
+}
+
+.option-text{
+  font-size: 13px;
+}
+
+.custom-card {
+  border-radius: 20px;
+  background-color: #f8f9fa; /* Light grey */
+  padding: 2rem;
+  text-align: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  transition: 0.3s;
+}
+
+.custom-card:hover {
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+}
+
+.custom-card img {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  margin-bottom: 1rem;
+}
+
+.custom-btn {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.75rem;
+}
+
+.checkbox-box {
+  display: inline-block;
+  width: 160px;
+  height: 40px;
+  border: 2px solid #007bff;
+  border-radius: 5px;
+  margin: 5px;
+  cursor: pointer;
+  position: relative;
+  text-align: center;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.checkbox-box input[type="checkbox"] {
+  display: none; 
+}
+
+.checkbox-box.checked {
+  background-color: #007bff;
+  color: white;
+}
+
+.checkbox-box span {
+  line-height: 40px;
+  user-select: none;
+  font-size: 13px;
+}
